@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { AlertTriangle, Phone, Clock, MapPin, Users, Zap, Hospital } from "lucide-react";
+import HospitalSearch from "./HospitalSearch";
 
 const EmergencyRequest = () => {
   const { toast } = useToast();
@@ -38,6 +39,15 @@ const EmergencyRequest = () => {
     setEmergencyData(prev => ({
       ...prev,
       [field]: value
+    }));
+  };
+
+  const handleHospitalSelect = (hospital: any) => {
+    console.log('Selected hospital:', hospital);
+    setEmergencyData(prev => ({
+      ...prev,
+      hospitalName: hospital.name,
+      hospitalAddress: hospital.address
     }));
   };
 
@@ -193,35 +203,19 @@ const EmergencyRequest = () => {
             </div>
           </div>
 
-          {/* Hospital Information */}
+          {/* Hospital Information with Auto-suggest */}
           <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
             <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
               <Hospital className="h-5 w-5 mr-2 text-blue-600" />
               Hospital Information
             </h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="hospitalName">Hospital Name *</Label>
-                <Input
-                  id="hospitalName"
-                  value={emergencyData.hospitalName}
-                  onChange={(e) => handleInputChange('hospitalName', e.target.value)}
-                  placeholder="Name of the hospital"
-                  required
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="hospitalAddress">Hospital Address *</Label>
-                <Input
-                  id="hospitalAddress"
-                  value={emergencyData.hospitalAddress}
-                  onChange={(e) => handleInputChange('hospitalAddress', e.target.value)}
-                  placeholder="Complete hospital address"
-                  required
-                  className="mt-1"
-                />
-              </div>
+            <div className="space-y-4">
+              <HospitalSearch
+                label="Hospital Name"
+                placeholder="Search for Delhi government hospitals..."
+                onHospitalSelect={handleHospitalSelect}
+                required
+              />
             </div>
           </div>
 
