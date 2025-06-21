@@ -9,9 +9,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Heart, MapPin, User, Phone, Calendar, Shield } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const DonorRegistration = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     name: '',
     age: '',
@@ -21,12 +26,14 @@ const DonorRegistration = () => {
     city: '',
     state: '',
     pincode: '',
+    address: '',
     lastDonation: '',
     medicalConditions: '',
     emergencyContact: '',
     agreeTerms: false,
     availableForEmergency: false
   });
+  const [loading, setLoading] = useState(false);
 
   const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
   const states = ['Maharashtra', 'Delhi', 'Karnataka', 'Tamil Nadu', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'];
@@ -38,7 +45,34 @@ const DonorRegistration = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const getCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          toast({
+            title: "Location captured",
+            description: "Your location has been captured for better donor matching",
+          });
+          // Store location in a way that can be used later
+          setFormData(prev => ({
+            ...prev,
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          } as any));
+        },
+        (error) => {
+          console.error('Location error:', error);
+          toast({
+            title: "Location error",
+            description: "Could not get your location. You can still register without it.",
+            variant: "destructive",
+          });
+        }
+      );
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.agreeTerms) {
@@ -50,29 +84,101 @@ const DonorRegistration = () => {
       return;
     }
 
-    console.log('Donor registration data:', formData);
-    
-    toast({
-      title: "Registration Successful! 🎉",
-      description: "Welcome to LifeFlow! You'll receive a verification SMS shortly.",
-    });
+    if (!formData.name || !formData.bloodType || !formData.phone || !formData.email) {
+      toast({
+        title: "Error",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    // Reset form
-    setFormData({
-      name: '',
-      age: '',
-      bloodType: '',
-      phone: '',
-      email: '',
-      city: '',
-      state: '',
-      pincode: '',
-      lastDonation: '',
-      medicalConditions: '',
-      emergencyContact: '',
-      agreeTerms: false,
-      availableForEmergency: false
-    });
+    setLoading(true);
+
+    try {
+      // First, register the user if not already logged in
+      if (!user) {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: `temp_${Date.now()}`, // Temporary password, user will reset
+          options: {
+            emailRedirectTo: `${window.location.origin}/`,
+            data: {
+              name: formData.name,
+              phone: formData.phone,
+              blood_group: formData.bloodType,
+              address: formData.address,
+              city: formData.city,
+              state: formData.state,
+            }
+          }
+        });
+
+        if (authError) throw authError;
+
+        toast({
+          title: "Registration Successful! 🎉",
+          description: "Please check your email to verify your account and set your password.",
+        });
+      } else {
+        // If user is already logged in, just update/create their donor profile
+        const donorData = {
+          user_id: user.id,
+          name: formData.name,
+          blood_group: formData.bloodType,
+          phone: formData.phone,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          location_lat: (formData as any).latitude,
+          location_lng: (formData as any).longitude,
+          availability_status: true,
+          last_donation_date: formData.lastDonation || null,
+          emergency_contact: formData.emergencyContact || null,
+          medical_conditions: formData.medicalConditions || null,
+          available_for_emergency: formData.availableForEmergency
+        };
+
+        const { error: donorError } = await supabase
+          .from('donors')
+          .upsert([donorData], { onConflict: 'user_id' });
+
+        if (donorError) throw donorError;
+
+        toast({
+          title: "Profile Updated! 🎉",
+          description: "Your donor profile has been successfully updated.",
+        });
+      }
+
+      // Reset form
+      setFormData({
+        name: '',
+        age: '',
+        bloodType: '',
+        phone: '',
+        email: '',
+        city: '',
+        state: '',
+        pincode: '',
+        address: '',
+        lastDonation: '',
+        medicalConditions: '',
+        emergencyContact: '',
+        agreeTerms: false,
+        availableForEmergency: false
+      });
+
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      toast({
+        title: "Registration Failed",
+        description: error.message || "An error occurred during registration. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -83,20 +189,22 @@ const DonorRegistration = () => {
             <Heart className="h-8 w-8 text-green-600" />
           </div>
         </div>
-        <CardTitle className="text-3xl font-bold text-gray-900">Become a Life Saver</CardTitle>
+        <CardTitle className="text-3xl font-bold text-gray-900">
+          {user ? 'Update Donor Profile' : 'Become a Life Saver'}
+        </CardTitle>
         <CardDescription className="text-lg text-gray-600">
-          Join thousands of verified donors and help save lives in your community
+          {user ? 'Update your donor information' : 'Join thousands of verified donors and help save lives in your community'}
         </CardDescription>
         <div className="flex justify-center mt-4">
           <Badge className="bg-green-100 text-green-800 text-sm px-4 py-2">
             <Shield className="h-4 w-4 mr-2" />
-            100% Verified & Secure
+            Real-time Database Integration
           </Badge>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div onSubmit={handleSubmit} className="space-y-6">
           {/* Personal Information */}
           <div className="bg-blue-50 p-6 rounded-lg">
             <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
@@ -116,7 +224,7 @@ const DonorRegistration = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="age">Age *</Label>
+                <Label htmlFor="age">Age</Label>
                 <Input
                   id="age"
                   type="number"
@@ -125,7 +233,6 @@ const DonorRegistration = () => {
                   value={formData.age}
                   onChange={(e) => handleInputChange('age', e.target.value)}
                   placeholder="18-65 years"
-                  required
                   className="mt-1"
                 />
               </div>
@@ -186,6 +293,7 @@ const DonorRegistration = () => {
                   placeholder="your.email@example.com"
                   required
                   className="mt-1"
+                  disabled={!!user}
                 />
               </div>
               <div>
@@ -208,20 +316,29 @@ const DonorRegistration = () => {
               <MapPin className="h-5 w-5 mr-2 text-green-600" />
               Location Information
             </h3>
-            <div className="grid md:grid-cols-3 gap-4">
+            <div className="grid md:grid-cols-3 gap-4 mb-4">
               <div>
-                <Label htmlFor="city">City *</Label>
+                <Label htmlFor="address">Address</Label>
+                <Input
+                  id="address"
+                  value={formData.address}
+                  onChange={(e) => handleInputChange('address', e.target.value)}
+                  placeholder="Enter your address"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="city">City</Label>
                 <Input
                   id="city"
                   value={formData.city}
                   onChange={(e) => handleInputChange('city', e.target.value)}
                   placeholder="Enter your city"
-                  required
                   className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="state">State *</Label>
+                <Label htmlFor="state">State</Label>
                 <Select value={formData.state} onValueChange={(value) => handleInputChange('state', value)}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select your state" />
@@ -233,19 +350,17 @@ const DonorRegistration = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label htmlFor="pincode">PIN Code *</Label>
-                <Input
-                  id="pincode"
-                  value={formData.pincode}
-                  onChange={(e) => handleInputChange('pincode', e.target.value)}
-                  placeholder="6-digit PIN code"
-                  pattern="[0-9]{6}"
-                  required
-                  className="mt-1"
-                />
-              </div>
             </div>
+            
+            <Button 
+              type="button"
+              variant="outline" 
+              onClick={getCurrentLocation}
+              className="flex items-center gap-2"
+            >
+              <MapPin className="h-4 w-4" />
+              Capture Current Location (Recommended)
+            </Button>
           </div>
 
           {/* Medical Information */}
@@ -278,7 +393,7 @@ const DonorRegistration = () => {
                 onCheckedChange={(checked) => handleInputChange('availableForEmergency', checked as boolean)}
               />
               <Label htmlFor="availableForEmergency" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                I'm available for emergency blood donation requests (24/7 notifications)
+                I'm available for emergency blood donation requests (Real-time notifications)
               </Label>
             </div>
 
@@ -296,14 +411,14 @@ const DonorRegistration = () => {
           </div>
 
           <Button 
-            type="submit" 
+            onClick={handleSubmit}
             className="w-full bg-green-500 hover:bg-green-600 text-white text-lg py-6 mt-8"
-            disabled={!formData.agreeTerms}
+            disabled={!formData.agreeTerms || loading}
           >
             <Heart className="h-5 w-5 mr-2" />
-            Register as Blood Donor
+            {loading ? 'Processing...' : (user ? 'Update Donor Profile' : 'Register as Blood Donor')}
           </Button>
-        </form>
+        </div>
 
         {/* Benefits Section */}
         <div className="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg mt-8">
@@ -311,19 +426,19 @@ const DonorRegistration = () => {
           <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-700">
             <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>Free health check-up before donation</span>
+              <span>Real-time matching with recipients</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>Digital donation certificate</span>
+              <span>Live donation tracking and history</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>Priority matching for your family</span>
+              <span>Automatic availability management</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>Recognition and donor badges</span>
+              <span>Emergency notification system</span>
             </div>
           </div>
         </div>

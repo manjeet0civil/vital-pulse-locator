@@ -10,7 +10,6 @@ import { useToast } from "@/hooks/use-toast";
 import { MapPin, Phone, Navigation, Clock, User, Droplets } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import HospitalSearch from "./HospitalSearch";
 
 interface Donor {
   id: string;
@@ -27,12 +26,11 @@ interface Donor {
   created_at: string;
 }
 
-const BloodSearch = () => {
+const DonorSearch = () => {
   const [searchData, setSearchData] = useState({
     bloodGroup: '',
     city: '',
-    state: '',
-    hospital: null as any
+    state: ''
   });
   const [donors, setDonors] = useState<Donor[]>([]);
   const [loading, setLoading] = useState(false);
@@ -46,7 +44,7 @@ const BloodSearch = () => {
   // Set up real-time subscription for donors
   useEffect(() => {
     const channel = supabase
-      .channel('blood-search-donors')
+      .channel('donors-changes')
       .on(
         'postgres_changes',
         {
@@ -55,7 +53,7 @@ const BloodSearch = () => {
           table: 'donors'
         },
         (payload) => {
-          console.log('Donor data changed in search:', payload);
+          console.log('Donor data changed:', payload);
           // Refetch donors when data changes
           if (searching) {
             handleSearch();
@@ -73,13 +71,6 @@ const BloodSearch = () => {
     setSearchData(prev => ({
       ...prev,
       [field]: value
-    }));
-  };
-
-  const handleHospitalSelect = (hospital: any) => {
-    setSearchData(prev => ({
-      ...prev,
-      hospital: hospital
     }));
   };
 
@@ -177,6 +168,16 @@ const BloodSearch = () => {
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  if (!user) {
+    return (
+      <Card className="w-full max-w-4xl mx-auto">
+        <CardContent className="text-center py-12">
+          <p className="text-gray-600">Please sign in to search for donors.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="w-full max-w-4xl mx-auto shadow-xl border-t-4 border-blue-500">
       <CardHeader className="text-center pb-6">
@@ -187,7 +188,7 @@ const BloodSearch = () => {
         </div>
         <CardTitle className="text-3xl font-bold text-gray-900">Find Blood Donors</CardTitle>
         <CardDescription className="text-lg text-gray-600">
-          Search for available donors in your area - Real-time results
+          Search for available donors in your area
         </CardDescription>
       </CardHeader>
 
@@ -198,54 +199,44 @@ const BloodSearch = () => {
             <Droplets className="h-5 w-5 mr-2 text-blue-600" />
             Search Criteria
           </h3>
-          <div className="space-y-4">
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="bloodGroup">Blood Group Required *</Label>
-                <Select value={searchData.bloodGroup} onValueChange={(value) => handleInputChange('bloodGroup', value)}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select blood type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {bloodTypes.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        <span className="font-semibold text-red-600">{type}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="city">City (Optional)</Label>
-                <Input
-                  id="city"
-                  value={searchData.city}
-                  onChange={(e) => handleInputChange('city', e.target.value)}
-                  placeholder="Enter city name"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="state">State (Optional)</Label>
-                <Select value={searchData.state} onValueChange={(value) => handleInputChange('state', value)}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select state" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {states.map((state) => (
-                      <SelectItem key={state} value={state}>{state}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
+          <div className="grid md:grid-cols-3 gap-4">
             <div>
-              <HospitalSearch
-                onHospitalSelect={handleHospitalSelect}
-                placeholder="Search for nearby hospitals..."
-                label="Hospital (Optional)"
+              <Label htmlFor="bloodGroup">Blood Group Required *</Label>
+              <Select value={searchData.bloodGroup} onValueChange={(value) => handleInputChange('bloodGroup', value)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select blood type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bloodTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      <span className="font-semibold text-red-600">{type}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="city">City (Optional)</Label>
+              <Input
+                id="city"
+                value={searchData.city}
+                onChange={(e) => handleInputChange('city', e.target.value)}
+                placeholder="Enter city name"
+                className="mt-1"
               />
+            </div>
+            <div>
+              <Label htmlFor="state">State (Optional)</Label>
+              <Select value={searchData.state} onValueChange={(value) => handleInputChange('state', value)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select state" />
+                </SelectTrigger>
+                <SelectContent>
+                  {states.map((state) => (
+                    <SelectItem key={state} value={state}>{state}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           
@@ -254,20 +245,19 @@ const BloodSearch = () => {
             className="w-full mt-6 bg-blue-500 hover:bg-blue-600 text-white"
             disabled={loading}
           >
-            {loading ? 'Searching...' : 'Search Available Donors'}
+            {loading ? 'Searching...' : 'Search Donors'}
           </Button>
         </div>
 
         {/* Search Results */}
         {donors.length > 0 && (
           <div className="space-y-4">
-            <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              Available Donors ({donors.length} found) - Live Data
+            <h3 className="text-xl font-semibold text-gray-900">
+              Available Donors ({donors.length} found)
             </h3>
             <div className="grid gap-4">
               {donors.map((donor) => (
-                <Card key={donor.id} className="border-l-4 border-green-500 hover:shadow-lg transition-shadow">
+                <Card key={donor.id} className="border-l-4 border-green-500">
                   <CardContent className="p-6">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -277,8 +267,8 @@ const BloodSearch = () => {
                             <Droplets className="h-3 w-3 mr-1" />
                             {donor.blood_group}
                           </Badge>
-                          <Badge className="bg-green-100 text-green-800 animate-pulse">
-                            Available Now
+                          <Badge className="bg-green-100 text-green-800">
+                            Available
                           </Badge>
                         </div>
                         
@@ -310,7 +300,7 @@ const BloodSearch = () => {
                           className="flex items-center gap-2"
                         >
                           <Navigation className="h-4 w-4" />
-                          Get Directions
+                          Directions
                         </Button>
                         <Button
                           onClick={() => handleContactDonor(donor)}
@@ -318,7 +308,7 @@ const BloodSearch = () => {
                           className="flex items-center gap-2 bg-green-500 hover:bg-green-600"
                         >
                           <Phone className="h-4 w-4" />
-                          Contact Now
+                          Contact
                         </Button>
                       </div>
                     </div>
@@ -335,17 +325,9 @@ const BloodSearch = () => {
             <p className="text-sm text-gray-500 mt-2">Try expanding your search by removing location filters.</p>
           </div>
         )}
-
-        {!user && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p className="text-yellow-800 text-center">
-              <strong>Note:</strong> Sign in to access all donor search features and contact information.
-            </p>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
 };
 
-export default BloodSearch;
+export default DonorSearch;

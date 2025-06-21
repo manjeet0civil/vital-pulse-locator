@@ -1,30 +1,128 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MapPin, Users, Clock, Shield, Phone } from "lucide-react";
+import { Heart, MapPin, Users, Clock, Shield, Phone, LogOut } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import DonorRegistration from "@/components/DonorRegistration";
-import BloodSearch from "@/components/BloodSearch";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import DonorProfile from "@/components/DonorProfile";
+import DonorSearch from "@/components/DonorSearch";
 import EmergencyRequest from "@/components/EmergencyRequest";
 import BloodCompatibilityChecker from "@/components/BloodCompatibilityChecker";
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('search');
+  const [stats, setStats] = useState({
+    activeDonors: 0,
+    totalRequests: 0,
+    emergencyRequests: 0
+  });
+  const [emergencyRequests, setEmergencyRequests] = useState<any[]>([]);
   const { toast } = useToast();
+  const { user, loading, signOut } = useAuth();
+  const navigate = useNavigate();
 
-  const stats = [
-    { label: "Active Donors", value: "2,847", icon: Users, color: "text-blue-600" },
-    { label: "Lives Saved", value: "1,293", icon: Heart, color: "text-red-600" },
+  // Fetch real-time statistics
+  useEffect(() => {
+    fetchStats();
+    fetchEmergencyRequests();
+
+    // Set up real-time subscriptions
+    const donorsChannel = supabase
+      .channel('donors-stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'donors' }, () => {
+        fetchStats();
+      })
+      .subscribe();
+
+    const requestsChannel = supabase
+      .channel('requests-stats')  
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blood_requests' }, () => {
+        fetchStats();
+        fetchEmergencyRequests();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(donorsChannel);
+      supabase.removeChannel(requestsChannel);
+    };
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      // Count active donors
+      const { count: donorCount } = await supabase
+        .from('donors')
+        .select('*', { count: 'exact', head: true })
+        .eq('availability_status', true);
+
+      // Count total requests
+      const { count: requestCount } = await supabase
+        .from('blood_requests')
+        .select('*', { count: 'exact', head: true });
+
+      // Count emergency requests
+      const { count: emergencyCount } = await supabase
+        .from('blood_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('urgency_level', 'emergency')
+        .eq('status', 'active');
+
+      setStats({
+        activeDonors: donorCount || 0,
+        totalRequests: requestCount || 0,
+        emergencyRequests: emergencyCount || 0
+      });
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  };
+
+  const fetchEmergencyRequests = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('blood_requests')
+        .select(`
+          *,
+          profiles!inner(name)
+        `)
+        .eq('urgency_level', 'emergency')
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (error) throw error;
+      setEmergencyRequests(data || []);
+    } catch (error) {
+      console.error('Error fetching emergency requests:', error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/auth');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-blue-50 flex items-center justify-center">
+        <div className="text-center">
+          <Heart className="h-12 w-12 text-red-500 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading LifeFlow...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const displayStats = [
+    { label: "Active Donors", value: stats.activeDonors.toString(), icon: Users, color: "text-blue-600" },
+    { label: "Total Lives Helped", value: stats.totalRequests.toString(), icon: Heart, color: "text-red-600" },
     { label: "Cities Covered", value: "156", icon: MapPin, color: "text-green-600" },
-    { label: "Emergency Requests", value: "24", icon: Clock, color: "text-orange-600" },
-  ];
-
-  const emergencyRequests = [
-    { id: 1, bloodType: "O-", location: "Mumbai Central Hospital", urgency: "Critical", time: "2 mins ago" },
-    { id: 2, bloodType: "AB+", location: "Delhi AIIMS", urgency: "Urgent", time: "15 mins ago" },
-    { id: 3, bloodType: "B-", location: "Bangalore Apollo", urgency: "Moderate", time: "1 hour ago" },
+    { label: "Emergency Requests", value: stats.emergencyRequests.toString(), icon: Clock, color: "text-orange-600" },
   ];
 
   return (
@@ -47,10 +145,20 @@ const Index = () => {
                 <Phone className="h-4 w-4" />
                 <span>Emergency: 108</span>
               </Button>
-              <Button className="bg-red-500 hover:bg-red-600 text-white">
-                <Shield className="h-4 w-4 mr-2" />
-                Hospital Login
-              </Button>
+              {user ? (
+                <div className="flex items-center space-x-4">
+                  <span className="text-sm text-gray-600">Welcome, {user.email}</span>
+                  <Button onClick={handleSignOut} variant="outline" className="flex items-center space-x-2">
+                    <LogOut className="h-4 w-4" />
+                    <span>Sign Out</span>
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={() => navigate('/auth')} className="bg-red-500 hover:bg-red-600 text-white">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Sign In
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -63,12 +171,12 @@ const Index = () => {
             Save Lives Through <span className="text-red-500">Blood Donation</span>
           </h2>
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Connect with verified blood donors in your area instantly. Our AI-powered platform helps match compatible donors with recipients in real-time, ensuring no life is lost due to blood shortage.
+            Connect with verified blood donors in your area instantly. Our real-time platform helps match compatible donors with recipients, ensuring no life is lost due to blood shortage.
           </p>
           
           {/* Stats Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
-            {stats.map((stat, index) => (
+            {displayStats.map((stat, index) => (
               <Card key={index} className="hover:shadow-lg transition-shadow duration-300">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-center mb-3">
@@ -90,28 +198,28 @@ const Index = () => {
             <Button
               onClick={() => setActiveTab('search')}
               variant={activeTab === 'search' ? 'default' : 'outline'}
-              className="bg-blue-500 hover:bg-blue-600 text-white"
+              className={activeTab === 'search' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}
             >
               Find Donors
             </Button>
             <Button
-              onClick={() => setActiveTab('register')}
-              variant={activeTab === 'register' ? 'default' : 'outline'}
-              className="bg-green-500 hover:bg-green-600 text-white"
+              onClick={() => setActiveTab('profile')}
+              variant={activeTab === 'profile' ? 'default' : 'outline'}
+              className={activeTab === 'profile' ? 'bg-green-500 hover:bg-green-600 text-white' : ''}
             >
-              Register as Donor
+              {user ? 'My Profile' : 'Donor Profile'}
             </Button>
             <Button
               onClick={() => setActiveTab('emergency')}
               variant={activeTab === 'emergency' ? 'default' : 'outline'}
-              className="bg-red-500 hover:bg-red-600 text-white animate-pulse"
+              className={activeTab === 'emergency' ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' : ''}
             >
               Emergency Request
             </Button>
             <Button
               onClick={() => setActiveTab('compatibility')}
               variant={activeTab === 'compatibility' ? 'default' : 'outline'}
-              className="bg-purple-500 hover:bg-purple-600 text-white"
+              className={activeTab === 'compatibility' ? 'bg-purple-500 hover:bg-purple-600 text-white' : ''}
             >
               Blood Compatibility
             </Button>
@@ -119,8 +227,8 @@ const Index = () => {
 
           {/* Tab Content */}
           <div className="max-w-4xl mx-auto">
-            {activeTab === 'search' && <BloodSearch />}
-            {activeTab === 'register' && <DonorRegistration />}
+            {activeTab === 'search' && <DonorSearch />}
+            {activeTab === 'profile' && <DonorProfile />}
             {activeTab === 'emergency' && <EmergencyRequest />}
             {activeTab === 'compatibility' && <BloodCompatibilityChecker />}
           </div>
@@ -128,40 +236,44 @@ const Index = () => {
       </section>
 
       {/* Emergency Requests Board */}
-      <section className="py-12 px-4 bg-red-50">
-        <div className="container mx-auto">
-          <h3 className="text-2xl font-bold text-center text-gray-900 mb-8">
-            🚨 Live Emergency Requests
-          </h3>
-          <div className="grid md:grid-cols-3 gap-6">
-            {emergencyRequests.map((request) => (
-              <Card key={request.id} className="border-l-4 border-red-500 hover:shadow-lg transition-shadow">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <Badge 
-                      variant="destructive" 
-                      className={`${
-                        request.urgency === 'Critical' ? 'bg-red-600' : 
-                        request.urgency === 'Urgent' ? 'bg-orange-500' : 'bg-yellow-500'
-                      }`}
+      {emergencyRequests.length > 0 && (
+        <section className="py-12 px-4 bg-red-50">
+          <div className="container mx-auto">
+            <h3 className="text-2xl font-bold text-center text-gray-900 mb-8">
+              🚨 Live Emergency Requests
+            </h3>
+            <div className="grid md:grid-cols-3 gap-6">
+              {emergencyRequests.map((request) => (
+                <Card key={request.id} className="border-l-4 border-red-500 hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <Badge variant="destructive" className="bg-red-600">
+                        Emergency
+                      </Badge>
+                      <span className="text-sm text-gray-500">
+                        {new Date(request.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <CardTitle className="text-lg">Blood Type: {request.blood_group}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-gray-600 mb-2">
+                      Requested by: {request.profiles?.name || 'Anonymous'}
+                    </p>
+                    <p className="text-gray-600 mb-4">{request.location}</p>
+                    <Button 
+                      onClick={() => setActiveTab('search')}
+                      className="w-full bg-red-500 hover:bg-red-600 text-white"
                     >
-                      {request.urgency}
-                    </Badge>
-                    <span className="text-sm text-gray-500">{request.time}</span>
-                  </div>
-                  <CardTitle className="text-lg">Blood Type: {request.bloodType}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-600 mb-4">{request.location}</p>
-                  <Button className="w-full bg-red-500 hover:bg-red-600 text-white">
-                    Respond to Request
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                      Help Now
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Features Section */}
       <section className="py-16 px-4 bg-white">
